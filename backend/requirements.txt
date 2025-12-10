@@ -2,3 +2,8 @@ fastapi>=0.100.0
 uvicorn>=0.20.0
 requests>=2.31.0
 pytz>=2023.3
+python-dotenv>=1.0.0
+
+# Trading SDKs
+kalshi-python>=2.1.0
+py-clob-client>=0.29.0

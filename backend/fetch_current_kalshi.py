@@ -6,7 +6,7 @@ from get_current_markets import get_current_market_urls
 
 # Configuration
 KALSHI_API_URL = "https://api.elections.kalshi.com/trade-api/v2/markets"
-BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
+BINANCE_PRICE_URL = "https://api.binance.us/api/v3/ticker/price"
 SYMBOL = "BTCUSDT"
 
 def get_binance_current_price():

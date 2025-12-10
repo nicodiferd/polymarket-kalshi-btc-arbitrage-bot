@@ -5,7 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { AlertCircle, TrendingUp } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { AlertCircle, TrendingUp, Power, Zap, Settings } from "lucide-react"
+
+interface TradingState {
+  auto_trade_enabled: boolean
+  kalshi_ready: boolean
+  polymarket_ready: boolean
+  paper_trading: boolean
+  last_auto_trade: string | null
+}
 
 interface MarketData {
   timestamp: string
@@ -41,12 +50,15 @@ interface MarketData {
   }>
   opportunities: Array<any>
   errors: string[]
+  trading?: TradingState
 }
 
 export default function Dashboard() {
   const [data, setData] = useState<MarketData | null>(null)
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
+  const [autoTradeEnabled, setAutoTradeEnabled] = useState(false)
+  const [isExecuting, setIsExecuting] = useState(false)
 
   const fetchData = async () => {
     try {
@@ -55,8 +67,54 @@ export default function Dashboard() {
       setData(json)
       setLastUpdated(new Date())
       setLoading(false)
+      // Sync auto-trade state from server
+      if (json.trading) {
+        setAutoTradeEnabled(json.trading.auto_trade_enabled)
+      }
     } catch (err) {
       console.error("Failed to fetch data", err)
+    }
+  }
+
+  const toggleAutoTrade = async () => {
+    try {
+      const newState = !autoTradeEnabled
+      const res = await fetch(`http://localhost:8000/trading/auto-trade?enabled=${newState}`, {
+        method: 'POST',
+      })
+      const json = await res.json()
+      setAutoTradeEnabled(json.auto_trade_enabled)
+    } catch (err) {
+      console.error("Failed to toggle auto-trade", err)
+    }
+  }
+
+  const executeManualTrade = async (opportunity: any) => {
+    if (isExecuting) return
+    setIsExecuting(true)
+    try {
+      const res = await fetch("http://localhost:8000/trading/execute", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kalshi_strike: opportunity.kalshi_strike,
+          poly_leg: opportunity.poly_leg,
+          kalshi_leg: opportunity.kalshi_leg,
+          poly_cost: opportunity.poly_cost,
+          kalshi_cost: opportunity.kalshi_cost,
+          quantity: 1,
+        }),
+      })
+      const json = await res.json()
+      console.log("Trade executed:", json)
+      alert(json.paper_trading
+        ? `Paper trade executed! Status: ${json.trade.status}`
+        : `Trade executed! Status: ${json.trade.status}`)
+    } catch (err) {
+      console.error("Failed to execute trade", err)
+      alert("Trade execution failed")
+    } finally {
+      setIsExecuting(false)
     }
   }
 
@@ -89,6 +147,53 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Trading Controls */}
+      <Card className="border-2 border-slate-200">
+        <CardContent className="py-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Settings className="h-5 w-5 text-slate-500" />
+                <span className="font-semibold">Trading Controls</span>
+              </div>
+
+              {/* Platform Status */}
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-muted-foreground">Kalshi:</span>
+                <Badge variant={data.trading?.kalshi_ready ? "default" : "secondary"} className={data.trading?.kalshi_ready ? "bg-green-600" : ""}>
+                  {data.trading?.kalshi_ready ? "Ready" : "Not Connected"}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-muted-foreground">Polymarket:</span>
+                <Badge variant={data.trading?.polymarket_ready ? "default" : "secondary"} className={data.trading?.polymarket_ready ? "bg-green-600" : ""}>
+                  {data.trading?.polymarket_ready ? "Ready" : "Not Connected"}
+                </Badge>
+              </div>
+
+              {/* Paper Trading Indicator */}
+              {data.trading?.paper_trading && (
+                <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300">
+                  Paper Trading Mode
+                </Badge>
+              )}
+            </div>
+
+            {/* Auto Trade Toggle */}
+            <div className="flex items-center gap-3">
+              <Button
+                variant={autoTradeEnabled ? "default" : "outline"}
+                className={autoTradeEnabled ? "bg-green-600 hover:bg-green-700" : ""}
+                onClick={toggleAutoTrade}
+              >
+                <Power className="h-4 w-4 mr-2" />
+                Auto-Trade: {autoTradeEnabled ? "ON" : "OFF"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {data.errors.length > 0 && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md flex items-start gap-2">
           <AlertCircle className="h-5 w-5 mt-0.5" />
@@ -104,12 +209,22 @@ export default function Dashboard() {
       )}
 
       {/* Best Opportunity Hero Card */}
-      {bestOpp && (
+      {bestOpp ? (
         <Card className="bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 shadow-sm">
           <CardHeader className="pb-2">
-            <div className="flex items-center gap-2 text-green-700">
-              <TrendingUp className="h-5 w-5" />
-              <CardTitle>Best Opportunity Found</CardTitle>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-green-700">
+                <TrendingUp className="h-5 w-5" />
+                <CardTitle>Best Opportunity Found</CardTitle>
+              </div>
+              <Button
+                className="bg-green-600 hover:bg-green-700"
+                onClick={() => executeManualTrade(bestOpp)}
+                disabled={isExecuting}
+              >
+                <Zap className="h-4 w-4 mr-2" />
+                {isExecuting ? "Executing..." : "Execute Trade"}
+              </Button>
             </div>
             <CardDescription>Risk-free arbitrage detected with highest margin</CardDescription>
           </CardHeader>
@@ -138,6 +253,30 @@ export default function Dashboard() {
                   <span>Total Cost</span>
                   <span>${bestOpp.total_cost.toFixed(3)}</span>
                 </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="bg-gradient-to-r from-slate-50 to-slate-100 border-slate-200 shadow-sm">
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2 text-slate-600">
+              <TrendingUp className="h-5 w-5" />
+              <CardTitle>No Arbitrage Opportunities</CardTitle>
+            </div>
+            <CardDescription>Markets are currently efficient - monitoring for price discrepancies</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-4">
+              <div className="text-center">
+                <div className="text-sm text-muted-foreground">Best Total Cost</div>
+                <div className="text-3xl font-bold text-slate-600">
+                  ${data.checks.length > 0 ? Math.min(...data.checks.map(c => c.total_cost)).toFixed(3) : "N/A"}
+                </div>
+                <div className="text-xs text-slate-500">Need &lt; $1.00 for arbitrage</div>
+              </div>
+              <div className="flex-1 text-sm text-slate-500">
+                <p>The bot is actively scanning {data.checks.length} strike combinations every second. An opportunity will appear here when the combined cost of opposing positions drops below $1.00.</p>
               </div>
             </div>
           </CardContent>
@@ -281,7 +420,9 @@ export default function Dashboard() {
                           +${check.margin.toFixed(3)}
                         </Badge>
                       ) : (
-                        <span className="text-muted-foreground text-xs">-</span>
+                        <Badge variant="outline" className="text-slate-500 border-slate-300">
+                          No Arb
+                        </Badge>
                       )}
                     </TableCell>
                   </TableRow>

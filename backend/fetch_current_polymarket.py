@@ -6,8 +6,8 @@ from get_current_markets import get_current_market_urls
 
 # Configuration
 POLYMARKET_API_URL = "https://gamma-api.polymarket.com/events"
-BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
-BINANCE_KLINES_URL = "https://api.binance.com/api/v3/klines"
+BINANCE_PRICE_URL = "https://api.binance.us/api/v3/ticker/price"
+BINANCE_KLINES_URL = "https://api.binance.us/api/v3/klines"
 SYMBOL = "BTCUSDT"
 
 CLOB_API_URL = "https://clob.polymarket.com/book"
