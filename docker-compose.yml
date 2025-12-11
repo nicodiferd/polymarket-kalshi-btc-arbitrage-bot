@@ -1,0 +1,83 @@
+version: "3.8"
+
+services:
+  # ==============================================
+  # VPN Gateway - Routes Polymarket traffic through Germany
+  # ==============================================
+  vpn:
+    image: qmcgaw/gluetun
+    container_name: gluetun-vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - VPN_SERVICE_PROVIDER=mullvad
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${MULLVAD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${MULLVAD_ADDRESS}
+      - SERVER_COUNTRIES=Germany
+      - FIREWALL=on
+      - FIREWALL_OUTBOUND_SUBNETS=192.168.0.0/16,172.16.0.0/12,10.0.0.0/8
+      - HEALTH_VPN_DURATION_INITIAL=30s
+      - HEALTH_VPN_DURATION_ADDITION=10s
+    ports:
+      # Polymarket backend exposed through VPN
+      - "8000:8000"
+    volumes:
+      - ./gluetun:/gluetun
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "https://ipinfo.io"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ==============================================
+  # Backend - Full API (routes through VPN for Polymarket)
+  # ==============================================
+  backend:
+    build: ./backend
+    container_name: arbitrage-backend
+    network_mode: "service:vpn"
+    environment:
+      # Polymarket credentials
+      - POLYMARKET_PRIVATE_KEY=${POLYMARKET_PRIVATE_KEY}
+      - POLYMARKET_FUNDER_ADDRESS=${POLYMARKET_FUNDER_ADDRESS}
+      - POLYMARKET_SIGNATURE_TYPE=${POLYMARKET_SIGNATURE_TYPE:-1}
+      # Kalshi credentials
+      - KALSHI_API_KEY_ID=${KALSHI_API_KEY_ID}
+      - KALSHI_PRIVATE_KEY_PATH=/app/keys/kalshi_private_key.pem
+      - KALSHI_USE_DEMO=${KALSHI_USE_DEMO:-true}
+      # Trading settings
+      - PAPER_TRADING=${PAPER_TRADING:-true}
+      - MIN_PROFIT_MARGIN=${MIN_PROFIT_MARGIN:-0.02}
+      - MAX_POSITION_SIZE=${MAX_POSITION_SIZE:-100}
+    volumes:
+      - ./backend:/app
+      - ./keys:/app/keys:ro
+    depends_on:
+      vpn:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ==============================================
+  # Frontend - Next.js Dashboard
+  # ==============================================
+  frontend:
+    build: ./frontend
+    container_name: arbitrage-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # API endpoint (through VPN gateway)
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+# ==============================================
+# Named volumes for persistence
+# ==============================================
+volumes:
+  gluetun:
