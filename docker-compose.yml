@@ -22,23 +22,29 @@ services:
       - WIREGUARD_ENDPOINT_IP=185.213.155.73
       - WIREGUARD_ENDPOINT_PORT=51820
       - WIREGUARD_PUBLIC_KEY=HQHCrq4J6bSpdW1fI5hR/bvcrYa6HgGgwaa5ZY749ik=
-      - FIREWALL=on
       - FIREWALL_OUTBOUND_SUBNETS=192.168.0.0/16,172.16.0.0/12,10.0.0.0/8
       - HTTP_CONTROL_SERVER_ADDRESS=:8080
-      # Enable SOCKS5 proxy for selective routing
-      - SHADOWSOCKS=off
-      - HTTPPROXY=off
+      # Proxy servers - enable both for flexibility
+      - HTTPPROXY=on
+      - HTTPPROXY_LISTENING_ADDRESS=:8888
       - SOCKS5=on
       - SOCKS5_LISTENING_ADDRESS=:1080
     ports:
       # Gluetun control server
       - "8080:8080"
-      # SOCKS5 proxy (internal use only, but exposed for debugging)
+      # HTTP Proxy
+      - "8888:8888"
+      # SOCKS5 proxy
       - "1080:1080"
     networks:
       - arbitrage-net
     volumes:
       - ./gluetun:/gluetun
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/v1/openvpn/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   # ==============================================
@@ -54,6 +60,7 @@ services:
     environment:
       # VPN Proxy for Polymarket only (geo-restricted)
       - VPN_PROXY_URL=socks5://vpn:1080
+      - VPN_HTTP_PROXY_URL=http://vpn:8888
       # Polymarket credentials
       - POLYMARKET_PRIVATE_KEY=${POLYMARKET_PRIVATE_KEY}
       - POLYMARKET_FUNDER_ADDRESS=${POLYMARKET_FUNDER_ADDRESS}
@@ -72,7 +79,8 @@ services:
       - ./backend:/app
       - ./keys:/app/keys:ro
     depends_on:
-      - vpn
+      vpn:
+        condition: service_healthy
     restart: unless-stopped
 
   # ==============================================

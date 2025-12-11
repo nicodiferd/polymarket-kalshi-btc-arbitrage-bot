@@ -39,6 +39,8 @@ SYMBOL = "BTCUSDT"
 # VPN Proxy configuration (only for Polymarket)
 # Set VPN_PROXY_URL to route Polymarket through VPN, e.g., "socks5://vpn:1080"
 VPN_PROXY_URL = os.environ.get("VPN_PROXY_URL", "")
+# HTTP proxy as fallback (e.g., "http://vpn:8888")
+VPN_HTTP_PROXY_URL = os.environ.get("VPN_HTTP_PROXY_URL", "")
 
 # Cache for hourly metadata (token IDs don't change within an hour)
 _metadata_cache: Dict[str, Any] = {}
@@ -47,13 +49,28 @@ _cache_timestamp: Optional[datetime.datetime] = None
 
 def get_proxy_connector() -> Optional[Any]:
     """Get a proxy connector for VPN routing (Polymarket only)"""
-    if not VPN_PROXY_URL or not PROXY_AVAILABLE:
-        return None
-    try:
-        return ProxyConnector.from_url(VPN_PROXY_URL)
-    except Exception as e:
-        print(f"[Warning] Failed to create proxy connector: {e}")
-        return None
+    # Try SOCKS5 first
+    if VPN_PROXY_URL and PROXY_AVAILABLE:
+        try:
+            connector = ProxyConnector.from_url(VPN_PROXY_URL)
+            print(f"[Proxy] Using SOCKS5 proxy: {VPN_PROXY_URL}")
+            return connector
+        except Exception as e:
+            print(f"[Warning] SOCKS5 proxy failed: {e}")
+
+    # Try HTTP proxy as fallback
+    if VPN_HTTP_PROXY_URL and PROXY_AVAILABLE:
+        try:
+            connector = ProxyConnector.from_url(VPN_HTTP_PROXY_URL)
+            print(f"[Proxy] Using HTTP proxy: {VPN_HTTP_PROXY_URL}")
+            return connector
+        except Exception as e:
+            print(f"[Warning] HTTP proxy failed: {e}")
+
+    if VPN_PROXY_URL or VPN_HTTP_PROXY_URL:
+        print("[Warning] No proxy available - Polymarket may be geo-blocked")
+
+    return None
 
 
 def get_cache_key() -> str:
