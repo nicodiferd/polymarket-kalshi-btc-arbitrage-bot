@@ -26,8 +26,8 @@ if [ ! -d keys ]; then
 fi
 
 # Check for Kalshi key
-if [ ! -f keys/kalshi_private_key.pem ]; then
-    echo "WARNING: keys/kalshi_private_key.pem not found"
+if [ ! -f keys/KALSHI_PRIVATE_KEY.pem ]; then
+    echo "WARNING: keys/KALSHI_PRIVATE_KEY.pem not found"
     echo "Kalshi trading will not work without this key"
 fi
 
