@@ -32,12 +32,6 @@ services:
       - "8080:8080"
     volumes:
       - ./gluetun:/gluetun
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9999"]
-      interval: 10s
-      timeout: 10s
-      start_period: 30s
-      retries: 5
     restart: unless-stopped
 
   # ==============================================
@@ -66,8 +60,7 @@ services:
       - ./backend:/app
       - ./keys:/app/keys:ro
     depends_on:
-      vpn:
-        condition: service_healthy
+      - vpn
     restart: unless-stopped
 
   # ==============================================
