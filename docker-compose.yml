@@ -38,10 +38,11 @@ services:
     volumes:
       - ./gluetun:/gluetun
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/v1/openvpn/status"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9999"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   # ==============================================
