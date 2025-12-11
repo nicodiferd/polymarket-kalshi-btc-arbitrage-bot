@@ -21,12 +21,12 @@ import pytz
 from functools import lru_cache
 from typing import Optional, Tuple, Dict, Any
 
-# Try to import aiohttp_socks for proxy support
+# Try to import aiohttp_socks for SOCKS proxy support
 try:
     from aiohttp_socks import ProxyConnector
-    PROXY_AVAILABLE = True
+    SOCKS_PROXY_AVAILABLE = True
 except ImportError:
-    PROXY_AVAILABLE = False
+    SOCKS_PROXY_AVAILABLE = False
 
 # API URLs
 POLYMARKET_GAMMA_API = "https://gamma-api.polymarket.com/events"
@@ -37,40 +37,23 @@ BINANCE_KLINES_URL = "https://api.binance.us/api/v3/klines"
 SYMBOL = "BTCUSDT"
 
 # VPN Proxy configuration (only for Polymarket)
-# Set VPN_PROXY_URL to route Polymarket through VPN, e.g., "socks5://vpn:1080"
+# Set VPN_PROXY_URL to route Polymarket through VPN
+# Supports: "http://vpn:8888" or "socks5://vpn:1080"
 VPN_PROXY_URL = os.environ.get("VPN_PROXY_URL", "")
-# HTTP proxy as fallback (e.g., "http://vpn:8888")
-VPN_HTTP_PROXY_URL = os.environ.get("VPN_HTTP_PROXY_URL", "")
 
 # Cache for hourly metadata (token IDs don't change within an hour)
 _metadata_cache: Dict[str, Any] = {}
 _cache_timestamp: Optional[datetime.datetime] = None
 
 
-def get_proxy_connector() -> Optional[Any]:
-    """Get a proxy connector for VPN routing (Polymarket only)"""
-    # Try SOCKS5 first
-    if VPN_PROXY_URL and PROXY_AVAILABLE:
-        try:
-            connector = ProxyConnector.from_url(VPN_PROXY_URL)
-            print(f"[Proxy] Using SOCKS5 proxy: {VPN_PROXY_URL}")
-            return connector
-        except Exception as e:
-            print(f"[Warning] SOCKS5 proxy failed: {e}")
+def get_proxy_url() -> Optional[str]:
+    """Get the proxy URL if configured"""
+    return VPN_PROXY_URL if VPN_PROXY_URL else None
 
-    # Try HTTP proxy as fallback
-    if VPN_HTTP_PROXY_URL and PROXY_AVAILABLE:
-        try:
-            connector = ProxyConnector.from_url(VPN_HTTP_PROXY_URL)
-            print(f"[Proxy] Using HTTP proxy: {VPN_HTTP_PROXY_URL}")
-            return connector
-        except Exception as e:
-            print(f"[Warning] HTTP proxy failed: {e}")
 
-    if VPN_PROXY_URL or VPN_HTTP_PROXY_URL:
-        print("[Warning] No proxy available - Polymarket may be geo-blocked")
-
-    return None
+def is_http_proxy(url: str) -> bool:
+    """Check if URL is an HTTP/HTTPS proxy (vs SOCKS)"""
+    return url.startswith("http://") or url.startswith("https://")
 
 
 def get_cache_key() -> str:
@@ -88,10 +71,10 @@ def is_cache_valid() -> bool:
     return now.hour == _cache_timestamp.hour and now.date() == _cache_timestamp.date()
 
 
-async def fetch_json(session: aiohttp.ClientSession, url: str, params: dict = None) -> Tuple[Any, Optional[str]]:
-    """Generic async JSON fetcher with error handling"""
+async def fetch_json(session: aiohttp.ClientSession, url: str, params: dict = None, proxy: str = None) -> Tuple[Any, Optional[str]]:
+    """Generic async JSON fetcher with error handling and optional proxy support"""
     try:
-        async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+        async with session.get(url, params=params, proxy=proxy, timeout=aiohttp.ClientTimeout(total=10)) as response:
             response.raise_for_status()
             return await response.json(), None
     except asyncio.TimeoutError:
@@ -141,7 +124,7 @@ async def fetch_binance_prices(session: aiohttp.ClientSession, target_time_utc: 
     return current_price, open_price, error
 
 
-async def fetch_polymarket_metadata(session: aiohttp.ClientSession, slug: str) -> Tuple[Optional[Dict], Optional[str]]:
+async def fetch_polymarket_metadata(session: aiohttp.ClientSession, slug: str, proxy: str = None) -> Tuple[Optional[Dict], Optional[str]]:
     """Fetch Polymarket event metadata (cached per hour)"""
     global _metadata_cache, _cache_timestamp
 
@@ -152,7 +135,7 @@ async def fetch_polymarket_metadata(session: aiohttp.ClientSession, slug: str) -
         return _metadata_cache[cache_key], None
 
     # Fetch fresh metadata
-    data, err = await fetch_json(session, POLYMARKET_GAMMA_API, {"slug": slug})
+    data, err = await fetch_json(session, POLYMARKET_GAMMA_API, {"slug": slug}, proxy)
 
     if err:
         return None, f"Polymarket metadata error: {err}"
@@ -197,9 +180,9 @@ async def fetch_polymarket_metadata(session: aiohttp.ClientSession, slug: str) -
     return metadata, None
 
 
-async def fetch_clob_price(session: aiohttp.ClientSession, token_id: str) -> Optional[float]:
+async def fetch_clob_price(session: aiohttp.ClientSession, token_id: str, proxy: str = None) -> Optional[float]:
     """Fetch best ask price from Polymarket CLOB"""
-    data, err = await fetch_json(session, POLYMARKET_CLOB_API, {"token_id": token_id})
+    data, err = await fetch_json(session, POLYMARKET_CLOB_API, {"token_id": token_id}, proxy)
 
     if err or not data:
         return None
@@ -210,13 +193,13 @@ async def fetch_clob_price(session: aiohttp.ClientSession, token_id: str) -> Opt
     return None
 
 
-async def fetch_polymarket_prices(session: aiohttp.ClientSession, metadata: Dict) -> Tuple[Dict[str, float], Optional[str]]:
+async def fetch_polymarket_prices(session: aiohttp.ClientSession, metadata: Dict, proxy: str = None) -> Tuple[Dict[str, float], Optional[str]]:
     """Fetch Polymarket prices for all outcomes in parallel"""
     token_ids = metadata["token_ids"]
 
     # Create tasks for all token prices
     tasks = {
-        outcome: fetch_clob_price(session, token_id)
+        outcome: fetch_clob_price(session, token_id, proxy)
         for outcome, token_id in token_ids.items()
     }
 
@@ -264,7 +247,7 @@ async def fetch_all_data_async(polymarket_slug: str, kalshi_event_ticker: str, t
     """
     Fetch all market data in parallel with SPLIT VPN ROUTING.
 
-    - Polymarket requests → Through VPN proxy (if VPN_PROXY_URL is set)
+    - Polymarket requests → Through VPN HTTP proxy (if VPN_PROXY_URL is set)
     - Kalshi/Binance requests → Direct (faster, no geo-restriction)
 
     This is the main entry point that replaces sequential fetching.
@@ -274,28 +257,45 @@ async def fetch_all_data_async(polymarket_slug: str, kalshi_event_ticker: str, t
     timing = {}
     routing_info = {"polymarket": "direct", "kalshi": "direct", "binance": "direct"}
 
-    # Create sessions - one for VPN (Polymarket), one for direct (Kalshi/Binance)
-    proxy_connector = get_proxy_connector()
+    proxy_url = get_proxy_url()
 
     # Direct session for Kalshi and Binance (no VPN needed)
     direct_session = aiohttp.ClientSession()
 
     # VPN session for Polymarket (geo-restricted)
-    if proxy_connector:
-        vpn_session = aiohttp.ClientSession(connector=proxy_connector)
-        routing_info["polymarket"] = f"vpn ({VPN_PROXY_URL})"
+    vpn_session = None
+    if proxy_url:
+        if is_http_proxy(proxy_url):
+            # For HTTP proxy, use aiohttp's built-in proxy support via trust_env or explicit proxy
+            # We'll pass proxy to each request instead of using a connector
+            vpn_session = direct_session  # We'll use proxy parameter in requests
+            routing_info["polymarket"] = f"http-proxy ({proxy_url})"
+        elif SOCKS_PROXY_AVAILABLE:
+            # For SOCKS proxy, use aiohttp-socks connector
+            try:
+                from aiohttp_socks import ProxyConnector
+                connector = ProxyConnector.from_url(proxy_url)
+                vpn_session = aiohttp.ClientSession(connector=connector)
+                routing_info["polymarket"] = f"socks-proxy ({proxy_url})"
+            except Exception as e:
+                print(f"[Warning] SOCKS proxy setup failed: {e}")
+                vpn_session = direct_session
+                routing_info["polymarket"] = "direct (socks failed)"
+        else:
+            vpn_session = direct_session
+            routing_info["polymarket"] = "direct (no socks support)"
     else:
-        # Fallback to direct if no proxy configured
         vpn_session = direct_session
-        if VPN_PROXY_URL:
-            routing_info["polymarket"] = "direct (proxy unavailable)"
+
+    # For HTTP proxy, we need to modify how we make requests
+    http_proxy = proxy_url if (proxy_url and is_http_proxy(proxy_url)) else None
 
     try:
         # Phase 1: Fetch all data in parallel with appropriate routing
         phase1_start = time.time()
 
-        # Polymarket through VPN
-        metadata_task = fetch_polymarket_metadata(vpn_session, polymarket_slug)
+        # Polymarket through VPN (with proxy if HTTP)
+        metadata_task = fetch_polymarket_metadata(vpn_session, polymarket_slug, http_proxy)
 
         # Kalshi and Binance direct (faster!)
         binance_task = fetch_binance_prices(direct_session, target_time_utc)
@@ -323,7 +323,7 @@ async def fetch_all_data_async(polymarket_slug: str, kalshi_event_ticker: str, t
         poly_prices = {}
         if metadata and not meta_err:
             phase2_start = time.time()
-            poly_prices, price_err = await fetch_polymarket_prices(vpn_session, metadata)
+            poly_prices, price_err = await fetch_polymarket_prices(vpn_session, metadata, http_proxy)
             timing["phase2_ms"] = round((time.time() - phase2_start) * 1000, 2)
             if price_err:
                 errors.append(price_err)
@@ -352,7 +352,7 @@ async def fetch_all_data_async(polymarket_slug: str, kalshi_event_ticker: str, t
     finally:
         # Clean up sessions
         await direct_session.close()
-        if vpn_session is not direct_session:
+        if vpn_session is not None and vpn_session is not direct_session:
             await vpn_session.close()
 
 
