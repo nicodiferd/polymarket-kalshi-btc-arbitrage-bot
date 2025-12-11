@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
-import { AlertCircle, TrendingUp, Power, Zap, Settings } from "lucide-react"
+import { AlertCircle, TrendingUp, Power, Zap, Settings, Clock } from "lucide-react"
 
 interface TradingState {
   auto_trade_enabled: boolean
@@ -16,8 +16,39 @@ interface TradingState {
   last_auto_trade: string | null
 }
 
+interface FeeBreakdown {
+  polymarket_trading: number
+  polymarket_gas: number
+  kalshi: number
+  total: number
+}
+
+interface Check {
+  kalshi_strike: number
+  type: string
+  poly_leg: string
+  kalshi_leg: string
+  poly_cost: number
+  kalshi_cost: number
+  total_cost: number
+  is_arbitrage: boolean
+  margin: number
+  gross_margin: number
+  net_margin: number
+  fees: FeeBreakdown
+  is_profitable_after_fees: boolean
+  hour_boundary_blocked?: boolean
+}
+
+interface HourBoundaryProtection {
+  active: boolean
+  minutes_until_safe: number
+  reason: string | null
+}
+
 interface MarketData {
   timestamp: string
+  contracts: number
   polymarket: {
     price_to_beat: number
     current_price: number
@@ -37,20 +68,11 @@ interface MarketData {
       subtitle: string
     }>
   }
-  checks: Array<{
-    kalshi_strike: number
-    type: string
-    poly_leg: string
-    kalshi_leg: string
-    poly_cost: number
-    kalshi_cost: number
-    total_cost: number
-    is_arbitrage: boolean
-    margin: number
-  }>
-  opportunities: Array<any>
+  checks: Check[]
+  opportunities: Check[]
   errors: string[]
   trading?: TradingState
+  hour_boundary_protection?: HourBoundaryProtection
 }
 
 export default function Dashboard() {
@@ -59,10 +81,11 @@ export default function Dashboard() {
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
   const [autoTradeEnabled, setAutoTradeEnabled] = useState(false)
   const [isExecuting, setIsExecuting] = useState(false)
+  const [contracts, setContracts] = useState(100)
 
   const fetchData = async () => {
     try {
-      const res = await fetch("http://localhost:8000/arbitrage")
+      const res = await fetch(`http://localhost:8000/arbitrage?contracts=${contracts}`)
       const json = await res.json()
       setData(json)
       setLastUpdated(new Date())
@@ -122,7 +145,7 @@ export default function Dashboard() {
     fetchData()
     const interval = setInterval(fetchData, 1000)
     return () => clearInterval(interval)
-  }, [])
+  }, [contracts])
 
   if (loading) return <div className="flex items-center justify-center h-screen">Loading...</div>
 
@@ -179,6 +202,23 @@ export default function Dashboard() {
               )}
             </div>
 
+            {/* Contract Quantity */}
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Contracts:</span>
+              <select
+                value={contracts}
+                onChange={(e) => setContracts(Number(e.target.value))}
+                className="border rounded px-2 py-1 text-sm bg-white"
+              >
+                <option value={10}>10</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={250}>250</option>
+                <option value={500}>500</option>
+                <option value={1000}>1,000</option>
+              </select>
+            </div>
+
             {/* Auto Trade Toggle */}
             <div className="flex items-center gap-3">
               <Button
@@ -208,51 +248,116 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Hour Boundary Protection Warning */}
+      {data.hour_boundary_protection?.active && (
+        <div className="bg-amber-50 border border-amber-300 text-amber-800 px-4 py-3 rounded-md flex items-center gap-3">
+          <Clock className="h-5 w-5 flex-shrink-0" />
+          <div className="flex-1">
+            <strong className="font-semibold">Market Transition in Progress</strong>
+            <p className="text-sm">
+              Hour boundary detected - trading paused to avoid false signals from closing/opening markets.
+              Resuming in <span className="font-mono font-bold">{data.hour_boundary_protection.minutes_until_safe}</span> minute{data.hour_boundary_protection.minutes_until_safe !== 1 ? 's' : ''}.
+            </p>
+          </div>
+          <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-400 flex-shrink-0">
+            Paused
+          </Badge>
+        </div>
+      )}
+
       {/* Best Opportunity Hero Card */}
       {bestOpp ? (
-        <Card className="bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 shadow-sm">
+        <Card className={`bg-gradient-to-r shadow-sm ${bestOpp.is_profitable_after_fees ? 'from-green-50 to-emerald-50 border-green-200' : 'from-yellow-50 to-amber-50 border-yellow-200'}`}>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-green-700">
+              <div className={`flex items-center gap-2 ${bestOpp.is_profitable_after_fees ? 'text-green-700' : 'text-yellow-700'}`}>
                 <TrendingUp className="h-5 w-5" />
-                <CardTitle>Best Opportunity Found</CardTitle>
+                <CardTitle>{bestOpp.is_profitable_after_fees ? 'Profitable Opportunity Found' : 'Opportunity Found (Unprofitable After Fees)'}</CardTitle>
               </div>
               <Button
-                className="bg-green-600 hover:bg-green-700"
+                className={data.hour_boundary_protection?.active ? "bg-amber-600 hover:bg-amber-700" : bestOpp.is_profitable_after_fees ? "bg-green-600 hover:bg-green-700" : "bg-yellow-600 hover:bg-yellow-700"}
                 onClick={() => executeManualTrade(bestOpp)}
-                disabled={isExecuting}
+                disabled={isExecuting || !bestOpp.is_profitable_after_fees || data.hour_boundary_protection?.active}
               >
-                <Zap className="h-4 w-4 mr-2" />
-                {isExecuting ? "Executing..." : "Execute Trade"}
+                {data.hour_boundary_protection?.active ? (
+                  <>
+                    <Clock className="h-4 w-4 mr-2" />
+                    Paused - {data.hour_boundary_protection.minutes_until_safe}m
+                  </>
+                ) : (
+                  <>
+                    <Zap className="h-4 w-4 mr-2" />
+                    {isExecuting ? "Executing..." : `Buy ${contracts} Contracts`}
+                  </>
+                )}
               </Button>
             </div>
-            <CardDescription>Risk-free arbitrage detected with highest margin</CardDescription>
+            <CardDescription>
+              {bestOpp.is_profitable_after_fees
+                ? `Net profit of $${(bestOpp.net_margin * contracts).toFixed(2)} on ${contracts} contracts`
+                : `Fees exceed gross margin - need larger spread`}
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-              <div className="text-center md:text-left">
-                <div className="text-sm text-muted-foreground">Profit Margin</div>
-                <div className="text-4xl font-bold text-green-700">${bestOpp.margin.toFixed(3)}</div>
-                <div className="text-xs text-green-600 font-medium">per unit</div>
+            <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+              {/* Margin Display */}
+              <div className="flex gap-6">
+                <div className="text-center">
+                  <div className="text-xs text-muted-foreground uppercase">Gross Margin</div>
+                  <div className="text-2xl font-bold text-slate-600">${bestOpp.gross_margin?.toFixed(3) || '0.000'}</div>
+                  <div className="text-xs text-slate-500">per contract</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-xs text-muted-foreground uppercase">Net Margin</div>
+                  <div className={`text-2xl font-bold ${bestOpp.net_margin > 0 ? 'text-green-700' : 'text-red-600'}`}>
+                    ${bestOpp.net_margin?.toFixed(3) || '0.000'}
+                  </div>
+                  <div className="text-xs text-slate-500">after fees</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-xs text-muted-foreground uppercase">Total Profit</div>
+                  <div className={`text-2xl font-bold ${bestOpp.net_margin > 0 ? 'text-green-700' : 'text-red-600'}`}>
+                    ${((bestOpp.net_margin || 0) * contracts).toFixed(2)}
+                  </div>
+                  <div className="text-xs text-slate-500">{contracts} contracts</div>
+                </div>
               </div>
 
-              <div className="flex-1 bg-white p-4 rounded-lg border border-green-100 w-full">
+              {/* Strategy & Fees */}
+              <div className="flex-1 bg-white p-4 rounded-lg border border-slate-200 w-full">
                 <div className="flex justify-between items-center mb-2">
                   <span className="font-semibold text-slate-700">Strategy</span>
-                  <Badge className="bg-green-600">Buy Both</Badge>
+                  <Badge className={bestOpp.is_profitable_after_fees ? "bg-green-600" : "bg-yellow-600"}>
+                    {bestOpp.is_profitable_after_fees ? 'Profitable' : 'Unprofitable'}
+                  </Badge>
                 </div>
                 <div className="flex justify-between text-sm mb-1">
                   <span>Polymarket {bestOpp.poly_leg}</span>
                   <span className="font-mono">${bestOpp.poly_cost.toFixed(3)}</span>
                 </div>
-                <div className="flex justify-between text-sm mb-3">
+                <div className="flex justify-between text-sm mb-2">
                   <span>Kalshi {bestOpp.kalshi_leg} (${bestOpp.kalshi_strike.toLocaleString()})</span>
                   <span className="font-mono">${bestOpp.kalshi_cost.toFixed(3)}</span>
                 </div>
-                <div className="pt-2 border-t border-dashed border-slate-200 flex justify-between font-bold">
+                <div className="pt-2 border-t border-dashed border-slate-200 flex justify-between text-sm">
                   <span>Total Cost</span>
-                  <span>${bestOpp.total_cost.toFixed(3)}</span>
+                  <span className="font-mono font-semibold">${bestOpp.total_cost.toFixed(3)}</span>
                 </div>
+
+                {/* Fee Breakdown */}
+                {bestOpp.fees && (
+                  <div className="mt-3 pt-2 border-t border-slate-200">
+                    <div className="text-xs text-muted-foreground uppercase mb-1">Fees ({contracts} contracts)</div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                      <span className="text-slate-500">Polymarket:</span>
+                      <span className="font-mono text-right">${(bestOpp.fees.polymarket_trading + bestOpp.fees.polymarket_gas).toFixed(4)}</span>
+                      <span className="text-slate-500">Kalshi:</span>
+                      <span className="font-mono text-right">${bestOpp.fees.kalshi.toFixed(4)}</span>
+                      <span className="text-slate-600 font-medium">Total Fees:</span>
+                      <span className="font-mono text-right font-medium">${bestOpp.fees.total.toFixed(4)}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>
@@ -379,11 +484,12 @@ export default function Dashboard() {
             </TableHeader>
             <TableBody>
               {data.checks.map((check, i) => {
-                const isProfitable = check.total_cost < 1.00
+                const hasGrossArb = check.total_cost < 1.00
+                const isNetProfitable = check.is_profitable_after_fees
                 const percentCost = Math.min(check.total_cost * 100, 100)
 
                 return (
-                  <TableRow key={i} className={isProfitable ? "bg-green-50/50" : ""}>
+                  <TableRow key={i} className={isNetProfitable ? "bg-green-50/50" : hasGrossArb ? "bg-yellow-50/30" : ""}>
                     <TableCell>
                       <Badge variant="outline" className="whitespace-nowrap">
                         {check.type.replace("Poly", "P").replace("Kalshi", "K")}
@@ -407,7 +513,7 @@ export default function Dashboard() {
                         <Progress
                           value={percentCost}
                           className="h-2"
-                          indicatorClassName={isProfitable ? "bg-green-500" : "bg-slate-400"}
+                          indicatorClassName={isNetProfitable ? "bg-green-500" : hasGrossArb ? "bg-yellow-500" : "bg-slate-400"}
                         />
                       </div>
                     </TableCell>
@@ -415,10 +521,34 @@ export default function Dashboard() {
                       ${check.total_cost.toFixed(3)}
                     </TableCell>
                     <TableCell className="text-right">
-                      {isProfitable ? (
-                        <Badge className="bg-green-600 hover:bg-green-700 whitespace-nowrap">
-                          +${check.margin.toFixed(3)}
-                        </Badge>
+                      {check.hour_boundary_blocked ? (
+                        <div className="flex flex-col items-end">
+                          <Badge variant="outline" className="text-amber-600 border-amber-400 whitespace-nowrap">
+                            <Clock className="h-3 w-3 mr-1" />
+                            Blocked
+                          </Badge>
+                          <span className="text-xs text-muted-foreground mt-1">
+                            Market transition
+                          </span>
+                        </div>
+                      ) : isNetProfitable ? (
+                        <div className="flex flex-col items-end">
+                          <Badge className="bg-green-600 hover:bg-green-700 whitespace-nowrap">
+                            +${check.net_margin?.toFixed(3)} net
+                          </Badge>
+                          <span className="text-xs text-muted-foreground mt-1">
+                            (${check.gross_margin?.toFixed(3)} gross)
+                          </span>
+                        </div>
+                      ) : hasGrossArb ? (
+                        <div className="flex flex-col items-end">
+                          <Badge variant="outline" className="text-yellow-600 border-yellow-400 whitespace-nowrap">
+                            ${check.net_margin?.toFixed(3)} net
+                          </Badge>
+                          <span className="text-xs text-muted-foreground mt-1">
+                            Fees: ${check.fees?.total?.toFixed(2)}
+                          </span>
+                        </div>
                       ) : (
                         <Badge variant="outline" className="text-slate-500 border-slate-300">
                           No Arb

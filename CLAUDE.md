@@ -40,12 +40,15 @@ Frontend (Next.js)         Backend (FastAPI)           External APIs
 ```
 
 ### Backend Modules (`/backend`)
-- **api.py**: FastAPI server, single `/arbitrage` endpoint, coordinates data fetching
+- **api.py**: FastAPI server with `/arbitrage`, `/trading/status`, `/trading/auto-trade`, `/trading/execute` endpoints
+- **fees.py**: Fee calculation module for both platforms
 - **arbitrage_bot.py**: Standalone CLI monitoring script
-- **fetch_current_polymarket.py**: Polymarket CLOB API + Binance price fetching
+- **fetch_current_polymarket.py**: Polymarket CLOB API + Binance.US price fetching
 - **fetch_current_kalshi.py**: Kalshi markets API fetching
 - **get_current_markets.py**: Determines current active market URLs (UTC/ET timezone handling)
-- **find_new_market.py** / **find_new_kalshi_market.py**: URL generation utilities
+- **config/settings.py**: Environment variable configuration
+- **traders/kalshi_trader.py**: Kalshi trading client
+- **traders/polymarket_trader.py**: Polymarket CLOB trading client
 
 ### Frontend Components (`/frontend`)
 - **app/page.tsx**: Main dashboard - polls backend, displays hero card, market cards, analysis table
@@ -64,7 +67,24 @@ Selects Kalshi markets within ±5 positions of closest strike to Polymarket stri
 2. **Poly < Kalshi**: Buy Poly UP + Kalshi NO
 3. **Poly == Kalshi**: Check both strategies
 
-Arbitrage exists when `total_cost < $1.00`, margin = `$1.00 - total_cost`
+Arbitrage exists when `total_cost < $1.00`, gross_margin = `$1.00 - total_cost`
+
+**Important**: Gross margin ≠ Net profit. Fees must be subtracted.
+
+### Fee Structure
+**Polymarket US:**
+- Trading: 0.01% taker fee (1 basis point)
+- Gas: ~$0.02 per transaction on Polygon
+
+**Kalshi:**
+- Formula: `ceil(0.07 × contracts × price × (1-price))`
+- Max: 1.75¢ per contract (at price = $0.50)
+- Maker fees: $0
+
+**Net Profitability:**
+- `net_margin = gross_margin - (total_fees / contracts)`
+- Kalshi fees dominate at ~350x Polymarket fees
+- Typically need 3-5% gross margin for net profitability at 100 contracts
 
 ### Price Normalization
 - Polymarket: CLOB API returns decimals (e.g., 0.38)
@@ -72,6 +92,26 @@ Arbitrage exists when `total_cost < $1.00`, margin = `$1.00 - total_cost`
 
 ### Timezone Handling
 Markets defined in ET (Eastern Time), normalized to UTC internally using pytz.
+
+## Configuration
+
+Environment variables in `backend/.env`:
+```bash
+# Kalshi (get from kalshi.com/account/api or demo.kalshi.co)
+KALSHI_API_KEY_ID=your-key-id
+KALSHI_PRIVATE_KEY_PATH=/path/to/private_key.pem
+KALSHI_USE_DEMO=true  # false for production
+
+# Polymarket (export from wallet settings)
+POLYMARKET_PRIVATE_KEY=0x...
+POLYMARKET_FUNDER_ADDRESS=0x...
+POLYMARKET_SIGNATURE_TYPE=1  # 0=EOA, 1=Email, 2=Browser
+
+# Trading
+PAPER_TRADING=true  # false for real trades
+MIN_PROFIT_MARGIN=0.02
+MAX_POSITION_SIZE=100
+```
 
 ## Code Style
 - Python: PEP 8
