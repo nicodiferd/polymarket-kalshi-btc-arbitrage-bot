@@ -57,7 +57,7 @@ def fetch_kalshi_data_struct():
             return None, f"Kalshi Error: {err}"
             
         if not markets:
-            return [], None
+            return {"event_ticker": event_ticker, "current_price": current_price, "markets": []}, None
             
         # Parse strikes and sort
         market_data = []
