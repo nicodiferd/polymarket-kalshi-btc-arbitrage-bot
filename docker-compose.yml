@@ -37,12 +37,6 @@ services:
       - arbitrage-net
     volumes:
       - ./gluetun:/gluetun
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9999"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
     restart: unless-stopped
 
   # ==============================================
@@ -76,8 +70,7 @@ services:
       - ./backend:/app
       - ./keys:/app/keys:ro
     depends_on:
-      vpn:
-        condition: service_healthy
+      - vpn
     restart: unless-stopped
 
   # ==============================================
