@@ -8,6 +8,12 @@ import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
 import { AlertCircle, TrendingUp, Power, Zap, Settings, Clock } from "lucide-react"
 
+// Use the same host as the frontend, but port 8000 for API
+const getApiUrl = () => {
+  if (typeof window === 'undefined') return 'http://localhost:8000'
+  return `http://${window.location.hostname}:8000`
+}
+
 interface TradingState {
   auto_trade_enabled: boolean
   kalshi_ready: boolean
@@ -85,7 +91,7 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     try {
-      const res = await fetch(`http://localhost:8000/arbitrage?contracts=${contracts}`)
+      const res = await fetch(`${getApiUrl()}/arbitrage?contracts=${contracts}`)
       const json = await res.json()
       setData(json)
       setLastUpdated(new Date())
@@ -102,7 +108,7 @@ export default function Dashboard() {
   const toggleAutoTrade = async () => {
     try {
       const newState = !autoTradeEnabled
-      const res = await fetch(`http://localhost:8000/trading/auto-trade?enabled=${newState}`, {
+      const res = await fetch(`${getApiUrl()}/trading/auto-trade?enabled=${newState}`, {
         method: 'POST',
       })
       const json = await res.json()
@@ -116,7 +122,7 @@ export default function Dashboard() {
     if (isExecuting) return
     setIsExecuting(true)
     try {
-      const res = await fetch("http://localhost:8000/trading/execute", {
+      const res = await fetch(`${getApiUrl()}/trading/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
