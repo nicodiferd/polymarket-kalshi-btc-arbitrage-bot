@@ -24,18 +24,20 @@ services:
       - WIREGUARD_PUBLIC_KEY=HQHCrq4J6bSpdW1fI5hR/bvcrYa6HgGgwaa5ZY749ik=
       - FIREWALL=on
       - FIREWALL_OUTBOUND_SUBNETS=192.168.0.0/16,172.16.0.0/12,10.0.0.0/8
-      - HEALTH_VPN_DURATION_INITIAL=60s
-      - HEALTH_VPN_DURATION_ADDITION=15s
+      - HTTP_CONTROL_SERVER_ADDRESS=:8080
     ports:
-      # Polymarket backend exposed through VPN
+      # Backend API exposed through VPN
       - "8000:8000"
+      # Gluetun control server
+      - "8080:8080"
     volumes:
       - ./gluetun:/gluetun
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "https://ipinfo.io"]
-      interval: 30s
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      interval: 10s
       timeout: 10s
-      retries: 3
+      start_period: 30s
+      retries: 5
     restart: unless-stopped
 
   # ==============================================
