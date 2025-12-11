@@ -33,7 +33,7 @@ services:
     volumes:
       - ./gluetun:/gluetun
     healthcheck:
-      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9999"]
       interval: 10s
       timeout: 10s
       start_period: 30s
