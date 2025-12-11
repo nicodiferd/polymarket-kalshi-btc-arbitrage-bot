@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   # ==============================================
-  # VPN Gateway - Routes Polymarket traffic through Germany
+  # VPN Gateway - SOCKS5 Proxy for Polymarket only
   # ==============================================
   vpn:
     image: qmcgaw/gluetun
@@ -25,25 +25,34 @@ services:
       - FIREWALL=on
       - FIREWALL_OUTBOUND_SUBNETS=192.168.0.0/16,172.16.0.0/12,10.0.0.0/8
       - HTTP_CONTROL_SERVER_ADDRESS=:8080
+      # Enable SOCKS5 proxy for selective routing
+      - SHADOWSOCKS=off
+      - HTTPPROXY=off
+      - SOCKS5=on
+      - SOCKS5_LISTENING_ADDRESS=:1080
     ports:
-      # Backend API exposed through VPN
-      - "8000:8000"
       # Gluetun control server
       - "8080:8080"
+      # SOCKS5 proxy (internal use only, but exposed for debugging)
+      - "1080:1080"
     volumes:
       - ./gluetun:/gluetun
     restart: unless-stopped
 
   # ==============================================
-  # Backend - Full API (routes through VPN for Polymarket)
+  # Backend - Split routing: Polymarket via VPN, Kalshi/Binance direct
   # ==============================================
   backend:
     build: ./backend
     container_name: arbitrage-backend
-    network_mode: "service:vpn"
+    # NO network_mode - backend has direct internet + uses VPN proxy selectively
     security_opt:
       - apparmor:unconfined
+    ports:
+      - "8000:8000"
     environment:
+      # VPN Proxy for Polymarket only (geo-restricted)
+      - VPN_PROXY_URL=socks5://vpn:1080
       # Polymarket credentials
       - POLYMARKET_PRIVATE_KEY=${POLYMARKET_PRIVATE_KEY}
       - POLYMARKET_FUNDER_ADDRESS=${POLYMARKET_FUNDER_ADDRESS}

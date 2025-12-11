@@ -43,7 +43,7 @@ def get_polymarket_data(slug):
         response = requests.get(POLYMARKET_API_URL, params={"slug": slug})
         response.raise_for_status()
         data = response.json()
-        
+
         if not data:
             return None, "Event not found"
 
@@ -51,13 +51,24 @@ def get_polymarket_data(slug):
         markets = event.get("markets", [])
         if not markets:
             return None, "Markets not found in event"
-            
+
         market = markets[0]
-        
-        # Get Token IDs
-        # clobTokenIds is a list of strings
-        clob_token_ids = eval(market.get("clobTokenIds", "[]"))
-        outcomes = eval(market.get("outcomes", "[]"))
+
+        # Get Token IDs - use json.loads instead of eval for security
+        import json
+        clob_token_ids_raw = market.get("clobTokenIds", "[]")
+        outcomes_raw = market.get("outcomes", "[]")
+
+        # Handle both string and list formats
+        if isinstance(clob_token_ids_raw, str):
+            clob_token_ids = json.loads(clob_token_ids_raw)
+        else:
+            clob_token_ids = clob_token_ids_raw
+
+        if isinstance(outcomes_raw, str):
+            outcomes = json.loads(outcomes_raw)
+        else:
+            outcomes = outcomes_raw
         
         if len(clob_token_ids) != 2:
             return None, "Unexpected number of tokens"

@@ -52,6 +52,22 @@ interface HourBoundaryProtection {
   reason: string | null
 }
 
+interface MarketSync {
+  fetch_duration_ms: number
+  timing_breakdown?: {
+    phase1_ms?: number
+    phase2_ms?: number
+    total_ms?: number
+  }
+  async_mode: boolean
+}
+
+interface BestStrike {
+  kalshi_strike: number
+  net_margin: number
+  is_profitable: boolean
+}
+
 interface MarketData {
   timestamp: string
   contracts: number
@@ -72,6 +88,7 @@ interface MarketData {
       yes_ask: number
       no_ask: number
       subtitle: string
+      ticker?: string
     }>
   }
   checks: Check[]
@@ -79,6 +96,8 @@ interface MarketData {
   errors: string[]
   trading?: TradingState
   hour_boundary_protection?: HourBoundaryProtection
+  market_sync?: MarketSync
+  best_strike?: BestStrike
 }
 
 export default function Dashboard() {
@@ -170,6 +189,22 @@ export default function Dashboard() {
             <span className="w-2 h-2 rounded-full bg-green-500 mr-2"></span>
             Live
           </Badge>
+          {/* Latency indicator */}
+          {data.market_sync && (
+            <Badge
+              variant="outline"
+              className={`${
+                data.market_sync.fetch_duration_ms < 500
+                  ? 'bg-green-50 text-green-700 border-green-300'
+                  : data.market_sync.fetch_duration_ms < 1000
+                  ? 'bg-yellow-50 text-yellow-700 border-yellow-300'
+                  : 'bg-red-50 text-red-700 border-red-300'
+              }`}
+            >
+              {data.market_sync.fetch_duration_ms.toFixed(0)}ms
+              {data.market_sync.async_mode && ' (async)'}
+            </Badge>
+          )}
         </div>
         <div className="text-sm text-muted-foreground">
           Last updated: {lastUpdated.toLocaleTimeString()}
@@ -439,32 +474,98 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="bg-slate-100 p-3 rounded-md mb-4">
+              <div className="bg-slate-100 p-3 rounded-md">
                 <div className="text-xs text-muted-foreground uppercase font-bold">Current Price</div>
                 <div className="text-xl font-mono font-semibold">${data.kalshi?.current_price?.toLocaleString() || 'N/A'}</div>
               </div>
 
-              <div className="space-y-3 max-h-[200px] overflow-y-auto pr-2">
-                {(data.kalshi?.markets || [])
-                  .filter(m => Math.abs(m.strike - data.polymarket.price_to_beat) < 2500)
-                  .map((m, i) => (
-                    <div key={i} className="text-sm border-b pb-2 last:border-0">
-                      <div className="flex justify-between font-medium mb-1">
-                        <span>{m.subtitle}</span>
+              {/* Show best strike from API (or closest if not available) */}
+              {(() => {
+                const markets = data.kalshi?.markets || []
+                const polyPrice = data.polymarket.price_to_beat
+
+                // Use best_strike from API if available, otherwise find closest
+                const bestStrikeValue = data.best_strike?.kalshi_strike
+                let displayMarket = bestStrikeValue
+                  ? markets.find(m => m.strike === bestStrikeValue)
+                  : null
+
+                // Fallback to closest if best_strike not found
+                if (!displayMarket) {
+                  displayMarket = markets.reduce((closest, m) => {
+                    if (!closest) return m
+                    return Math.abs(m.strike - polyPrice) < Math.abs(closest.strike - polyPrice) ? m : closest
+                  }, null as typeof markets[0] | null)
+                }
+
+                if (!displayMarket) return <div className="text-sm text-muted-foreground">No markets available</div>
+
+                const isBestProfitable = data.best_strike?.is_profitable
+
+                return (
+                  <div className="space-y-2">
+                    <div className={`p-3 rounded-md border ${
+                      isBestProfitable
+                        ? 'bg-green-50 border-green-200'
+                        : 'bg-blue-50 border-blue-200'
+                    }`}>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className={`text-xs uppercase font-bold ${
+                          isBestProfitable ? 'text-green-600' : 'text-blue-600'
+                        }`}>
+                          {isBestProfitable ? 'Best Strike (Profitable)' : 'Best Strike'}
+                        </span>
+                        <Badge variant="outline" className={
+                          isBestProfitable
+                            ? 'bg-green-100 text-green-700 border-green-300'
+                            : 'bg-blue-100 text-blue-700 border-blue-300'
+                        }>
+                          ${displayMarket.strike.toLocaleString()}
+                        </Badge>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="flex justify-between text-xs text-muted-foreground">
-                          <span>Yes: {m.yes_ask}¢</span>
-                          <span>No: {m.no_ask}¢</span>
+                      <div className="text-sm text-muted-foreground mb-2">{displayMarket.subtitle}</div>
+                      {data.best_strike && (
+                        <div className={`text-xs mb-2 ${
+                          data.best_strike.net_margin > 0 ? 'text-green-600' : 'text-slate-500'
+                        }`}>
+                          Net margin: ${data.best_strike.net_margin.toFixed(4)}/contract
                         </div>
-                        <div className="flex h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                          <div className="bg-green-500 h-full" style={{ width: `${m.yes_ask}%` }}></div>
-                          <div className="bg-red-500 h-full" style={{ width: `${m.no_ask}%` }}></div>
+                      )}
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center text-sm">
+                          <span>YES Contract</span>
+                          <span className="font-mono font-medium">${(displayMarket.yes_ask / 100).toFixed(2)}</span>
                         </div>
+                        <Progress value={displayMarket.yes_ask} className="h-2 bg-slate-100" indicatorClassName="bg-green-500" />
+
+                        <div className="flex justify-between items-center text-sm mt-2">
+                          <span>NO Contract</span>
+                          <span className="font-mono font-medium">${(displayMarket.no_ask / 100).toFixed(2)}</span>
+                        </div>
+                        <Progress value={displayMarket.no_ask} className="h-2 bg-slate-100" indicatorClassName="bg-red-500" />
                       </div>
                     </div>
-                  ))}
-              </div>
+
+                    {/* Show other nearby strikes in compact form */}
+                    <details className="text-sm">
+                      <summary className="text-muted-foreground cursor-pointer hover:text-slate-700">
+                        Other strikes being scanned ({markets.filter(m => Math.abs(m.strike - polyPrice) <= 1500 && m.strike !== displayMarket.strike).length} more)
+                      </summary>
+                      <div className="mt-2 space-y-1 max-h-[120px] overflow-y-auto">
+                        {markets
+                          .filter(m => Math.abs(m.strike - polyPrice) <= 1500 && m.strike !== displayMarket.strike)
+                          .sort((a, b) => Math.abs(a.strike - polyPrice) - Math.abs(b.strike - polyPrice))
+                          .map((m, i) => (
+                            <div key={i} className="flex justify-between text-xs text-muted-foreground py-1 border-b border-slate-100 last:border-0">
+                              <span>${m.strike.toLocaleString()}</span>
+                              <span>Y: {m.yes_ask}¢ / N: {m.no_ask}¢</span>
+                            </div>
+                          ))}
+                      </div>
+                    </details>
+                  </div>
+                )
+              })()}
             </div>
           </CardContent>
         </Card>

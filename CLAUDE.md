@@ -16,7 +16,7 @@ python3 api.py                    # Start API server (localhost:8000)
 python3 arbitrage_bot.py          # Run CLI monitoring loop
 ```
 
-### Frontend (Next.js 16)
+### Frontend (Next.js 14)
 ```bash
 cd frontend
 npm install                       # Install dependencies
@@ -25,29 +25,43 @@ npm run build                     # Build production bundle
 npm run lint                      # Run ESLint
 ```
 
+### Docker (Full Stack with VPN)
+```bash
+docker-compose up -d              # Start all services (vpn, backend, frontend)
+docker-compose logs -f backend    # Follow backend logs
+docker-compose down               # Stop all services
+```
+
 ## Architecture
 
 ```
 Frontend (Next.js)         Backend (FastAPI)           External APIs
      |                          |                           |
      |-- GET /arbitrage ------->|                           |
-     |                          |-- Polymarket CLOB API --->|
-     |                          |-- Kalshi Trade API ------>|
-     |                          |-- Binance Price API ----->|
+     |                          |-- Polymarket CLOB API --->| (via VPN SOCKS5 proxy)
+     |                          |-- Kalshi Trade API ------>| (DIRECT - faster!)
+     |                          |-- Binance Price API ----->| (DIRECT - faster!)
      |<-- JSON Response --------|                           |
      |                          |                           |
-(polls every 1s)           (orchestrates & calculates)
+(polls every 1s)           (async parallel fetching)
 ```
 
+**Split VPN Routing**: Only Polymarket requests go through VPN (geo-restricted in US). Kalshi and Binance use direct connections for lower latency.
+
+- **VPN container (gluetun)**: Exposes SOCKS5 proxy on port 1080
+- **Backend**: Uses `VPN_PROXY_URL=socks5://vpn:1080` for Polymarket only
+- **async_fetcher.py**: Parallel API calls with split routing (~200-300ms vs 1.5-2s)
+
 ### Backend Modules (`/backend`)
-- **api.py**: FastAPI server with `/arbitrage`, `/trading/status`, `/trading/auto-trade`, `/trading/execute` endpoints
+- **api.py**: FastAPI server with `/arbitrage`, `/trading/status`, `/trading/auto-trade`, `/trading/execute` endpoints. Includes hour-boundary protection to prevent trading during market transitions (±2 min around hour marks)
+- **async_fetcher.py**: High-performance async data fetcher with split VPN routing and caching
 - **fees.py**: Fee calculation module for both platforms
 - **arbitrage_bot.py**: Standalone CLI monitoring script
-- **fetch_current_polymarket.py**: Polymarket CLOB API + Binance.US price fetching
-- **fetch_current_kalshi.py**: Kalshi markets API fetching
+- **fetch_current_polymarket.py**: Polymarket CLOB API + Binance.US price fetching (sync fallback)
+- **fetch_current_kalshi.py**: Kalshi markets API fetching (sync fallback)
 - **get_current_markets.py**: Determines current active market URLs (UTC/ET timezone handling)
-- **config/settings.py**: Environment variable configuration
-- **traders/kalshi_trader.py**: Kalshi trading client
+- **config/settings.py**: Environment variable configuration (pydantic settings)
+- **traders/kalshi_trader.py**: Kalshi trading client (RSA-PSS signed API requests)
 - **traders/polymarket_trader.py**: Polymarket CLOB trading client
 
 ### Frontend Components (`/frontend`)
@@ -95,11 +109,11 @@ Markets defined in ET (Eastern Time), normalized to UTC internally using pytz.
 
 ## Configuration
 
-Environment variables in `backend/.env`:
+Environment variables in `backend/.env` (or `.env` in project root for Docker):
 ```bash
 # Kalshi (get from kalshi.com/account/api or demo.kalshi.co)
 KALSHI_API_KEY_ID=your-key-id
-KALSHI_PRIVATE_KEY_PATH=/path/to/private_key.pem
+KALSHI_PRIVATE_KEY_PATH=/path/to/private_key.pem  # Docker: /app/keys/kalshi_private_key.pem
 KALSHI_USE_DEMO=true  # false for production
 
 # Polymarket (export from wallet settings)
@@ -111,6 +125,10 @@ POLYMARKET_SIGNATURE_TYPE=1  # 0=EOA, 1=Email, 2=Browser
 PAPER_TRADING=true  # false for real trades
 MIN_PROFIT_MARGIN=0.02
 MAX_POSITION_SIZE=100
+
+# VPN (Docker only - for Polymarket geo-restriction bypass)
+MULLVAD_PRIVATE_KEY=...
+MULLVAD_ADDRESS=...
 ```
 
 ## Code Style

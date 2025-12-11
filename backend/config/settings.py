@@ -22,6 +22,10 @@ class Settings:
     POLYMARKET_HOST = "https://clob.polymarket.com"
     POLYMARKET_CHAIN_ID = 137  # Polygon mainnet
 
+    # VPN Proxy for Polymarket (geo-restricted in US)
+    # Format: "socks5://host:port" or empty for direct
+    VPN_PROXY_URL = os.getenv("VPN_PROXY_URL", "")
+
     # Trading Configuration
     MAX_POSITION_SIZE = float(os.getenv("MAX_POSITION_SIZE", "100"))
     MIN_PROFIT_MARGIN = float(os.getenv("MIN_PROFIT_MARGIN", "0.02"))
@@ -34,5 +38,14 @@ class Settings:
     def validate_polymarket(self):
         """Check if Polymarket credentials are configured"""
         return bool(self.POLYMARKET_PRIVATE_KEY)
+
+    def get_polymarket_proxies(self):
+        """Get proxy dict for requests library (Polymarket routing)"""
+        if not self.VPN_PROXY_URL:
+            return None
+        return {
+            "http": self.VPN_PROXY_URL,
+            "https": self.VPN_PROXY_URL,
+        }
 
 settings = Settings()
