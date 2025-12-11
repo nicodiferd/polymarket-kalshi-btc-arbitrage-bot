@@ -35,6 +35,8 @@ services:
       - "8080:8080"
       # SOCKS5 proxy (internal use only, but exposed for debugging)
       - "1080:1080"
+    networks:
+      - arbitrage-net
     volumes:
       - ./gluetun:/gluetun
     restart: unless-stopped
@@ -45,7 +47,6 @@ services:
   backend:
     build: ./backend
     container_name: arbitrage-backend
-    # NO network_mode - backend has direct internet + uses VPN proxy selectively
     security_opt:
       - apparmor:unconfined
     ports:
@@ -65,6 +66,8 @@ services:
       - PAPER_TRADING=${PAPER_TRADING:-true}
       - MIN_PROFIT_MARGIN=${MIN_PROFIT_MARGIN:-0.02}
       - MAX_POSITION_SIZE=${MAX_POSITION_SIZE:-100}
+    networks:
+      - arbitrage-net
     volumes:
       - ./backend:/app
       - ./keys:/app/keys:ro
@@ -83,14 +86,22 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # API endpoint (through VPN gateway)
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+    networks:
+      - arbitrage-net
     volumes:
       - ./frontend:/app
       - /app/node_modules
     depends_on:
       - backend
     restart: unless-stopped
+
+# ==============================================
+# Networks - shared network for inter-container communication
+# ==============================================
+networks:
+  arbitrage-net:
+    driver: bridge
 
 # ==============================================
 # Named volumes for persistence
